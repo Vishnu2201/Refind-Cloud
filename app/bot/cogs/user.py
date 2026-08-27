@@ -7,6 +7,8 @@ from discord import app_commands
 from discord.ext import commands
 
 from app.database.session import get_session_factory
+from app.modules.guild_members.service import get_or_create_guild_member
+from app.modules.guilds.service import get_or_create_guild
 from app.modules.users.service import get_or_create_user
 
 logger = logging.getLogger(__name__)
@@ -38,6 +40,21 @@ class UserCog(commands.Cog):
                     username=username,
                     global_name=global_name,
                 )
+
+                # Register Guild & GuildMember relationship if executed inside a Discord guild
+                if interaction.guild is not None:
+                    guild, _ = await get_or_create_guild(
+                        session=session,
+                        discord_guild_id=interaction.guild.id,
+                        name=interaction.guild.name,
+                    )
+                    joined_at = getattr(discord_user, "joined_at", None)
+                    await get_or_create_guild_member(
+                        session=session,
+                        guild_id=guild.id,
+                        user_id=user.id,
+                        joined_at=joined_at,
+                    )
 
         status_label = "New profile created!" if created else "Profile retrieved."
         display_name = f" ({user.global_name})" if user.global_name else ""

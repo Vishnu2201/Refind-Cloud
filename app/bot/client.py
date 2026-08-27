@@ -7,7 +7,9 @@ from discord.ext import commands
 
 from app.core.context import get_app_context
 from app.database.session import check_database_health, close_db_engine, get_session_factory, init_db_resources
+from app.modules.guild_members.service import get_or_create_guild_member
 from app.modules.guilds.service import get_or_create_guild
+from app.modules.users.service import get_or_create_user
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +128,40 @@ class RefindCloudBot(commands.Bot):
                     )
         except Exception as exc:
             logger.error(f"Error registering newly joined guild {guild.id}: {exc}")
+
+    async def on_member_join(self, member: discord.Member) -> None:
+        """Event fired when a member joins a Discord guild."""
+        logger.info(
+            f"Member {member} (ID: {member.id}) joined guild {member.guild.name} (ID: {member.guild.id})"
+        )
+        try:
+            session_factory = get_session_factory()
+            async with session_factory() as session:
+                async with session.begin():
+                    # 1. Ensure Guild exists
+                    guild, _ = await get_or_create_guild(
+                        session=session,
+                        discord_guild_id=member.guild.id,
+                        name=member.guild.name,
+                    )
+                    # 2. Ensure User exists or is created/updated
+                    user, _ = await get_or_create_user(
+                        session=session,
+                        discord_user_id=member.id,
+                        username=member.name,
+                        global_name=member.global_name or member.display_name,
+                    )
+                    # 3. Ensure GuildMember relationship exists
+                    await get_or_create_guild_member(
+                        session=session,
+                        guild_id=guild.id,
+                        user_id=user.id,
+                        joined_at=member.joined_at,
+                    )
+        except Exception as exc:
+            logger.error(
+                f"Error persisting guild member join for user {member.id} in guild {member.guild.id}: {exc}"
+            )
 
     async def close(self) -> None:
         """Gracefully disposes database resources and closes Discord websocket connections."""
