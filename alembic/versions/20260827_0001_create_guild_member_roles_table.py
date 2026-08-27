@@ -1,7 +1,7 @@
 """create_initial_foundation_schema
 
 Revision ID: 20260827_0001
-Revises: 
+Revises: 18f13e13f285
 Create Date: 2026-08-27 18:50:00.000000
 
 """
@@ -13,7 +13,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = "20260827_0001"
-down_revision: Union[str, None] = None
+down_revision: Union[str, None] = "18f13e13f285"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

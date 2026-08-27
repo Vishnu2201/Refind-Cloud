@@ -92,10 +92,14 @@ async def get_open_ticket_for_user(
     user_id: uuid.UUID,
 ) -> Ticket | None:
     """Retrieves an active open ticket for a user in a specific guild, if one exists."""
-    stmt = select(Ticket).where(
-        Ticket.guild_id == guild_id,
-        Ticket.user_id == user_id,
-        Ticket.status == TicketStatus.OPEN,
+    stmt = (
+        select(Ticket)
+        .where(
+            Ticket.guild_id == guild_id,
+            Ticket.user_id == user_id,
+            Ticket.status == TicketStatus.OPEN,
+        )
+        .limit(1)
     )
     result = await session.execute(stmt)
     return result.scalars().first()
