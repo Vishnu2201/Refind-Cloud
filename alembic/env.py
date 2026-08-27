@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.core.config import get_settings
 from app.database.base import Base
+# Import all ORM models to populate Base.metadata for autogenerate
+import app.modules.users.models  # noqa: F401
 
 # Alembic Config object providing access to alembic.ini values
 config = context.config

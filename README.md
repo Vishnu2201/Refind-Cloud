@@ -25,15 +25,21 @@ Refind Cloud/
 │   ├── bot/                      # Discord bot client & cogs
 │   │   ├── client.py             # RefindCloudBot (commands.Bot subclass)
 │   │   └── cogs/                 # Slash command extensions
-│   │       └── ping.py           # Real /ping slash command
-│   ├── modules/                  # Future business domain modules placeholder
-│   │   └── README.md             # Architecture roadmap for future features
+│   │       ├── ping.py           # Real /ping slash command
+│   │       └── user.py           # Real /profile slash command
+│   ├── modules/                  # Business domain modules
+│   │   ├── README.md             # Architecture roadmap for future features
+│   │   └── users/                # Discord User Identity domain module
+│   │       ├── __init__.py
+│   │       ├── models.py         # User ORM model (users table)
+│   │       └── service.py        # Async user persistence & lookup service
 │   └── services/                 # Cross-cutting service layer placeholder
 │       └── README.md             # Service layer guidelines
 ├── tests/                        # Automated unit test suite
 │   ├── conftest.py               # Test environment fixtures
 │   ├── test_config.py            # Configuration validation tests
-│   └── test_database_utils.py    # Database utility & logger tests
+│   ├── test_database_utils.py    # Database utility & logger tests
+│   └── test_users.py             # User model and service logic tests
 ├── .env.example                  # Environment configuration template
 ├── .gitignore                    # Git ignore rules
 ├── docker-compose.yml            # PostgreSQL 16 infrastructure container
@@ -45,20 +51,18 @@ Refind Cloud/
 
 ## 2. Current Implementation Scope
 
-### Implemented Foundation Features:
+### Implemented Features:
 - **Environment Management**: Type-safe settings validation using `pydantic-settings`.
 - **Async Database Connection**: SQLAlchemy 2.x async engine with `asyncpg` pool management using `AppContext` as single resource owner.
 - **Strict Database Startup Gate**: Real PostgreSQL health check (`SELECT 1`). Aborts startup, disposes engine, and exits with non-zero status if database is unreachable.
-- **Discord Bot Foundation**: `RefindCloudBot` with minimum required intents, async `setup_hook`, graceful shutdown engine disposal.
-- **Dedicated Command Synchronization**: Modular `sync_application_commands()` supporting instant guild command sync via `DISCORD_GUILD_ID` or global sync.
-- **Real Slash Command**: `/ping` command returning real-time websocket latency in milliseconds.
+- **Discord User Identity Domain**: Persisted `users` table via `User` ORM model storing real Discord user ID, username, and global name.
+- **Discord Bot Foundation & Cogs**: `RefindCloudBot` with minimum required intents, async `setup_hook`, cog loading, and graceful shutdown engine disposal.
+- **Real Slash Commands**:
+  - `/ping`: Returns real-time websocket latency in milliseconds.
+  - `/profile`: Creates or retrieves the invoking Discord user's Refind Cloud profile in PostgreSQL.
 - **Structured Logging**: Development colorized logs or production JSON logs based on `ENVIRONMENT`.
-- **Safe Database Migrations**: Async Alembic setup with fail-fast validation of application settings.
-- **Automated Tests**: Database-independent pytest test suite for configuration and utilities.
-
-### Intentionally Excluded Features (Phase 1 Foundation):
-- No mock users, sample orders, fake VPS instances, seeded database records, or simulated business logic.
-- Future business modules (Tickets, VPS provisioning, Minecraft hosting, Customer accounts, Billing, Moderation, Security) are intentionally omitted and will be added in subsequent phases.
+- **Safe Database Migrations**: Async Alembic setup with `Base.metadata` auto-detection for `users` table.
+- **Automated Tests**: Pytest test suite for configuration, database utilities, and User domain logic.
 
 ---
 
@@ -140,16 +144,16 @@ Open `.env` and configure your credentials:
 
 ---
 
-### Step 5: Run Database Migrations (When Revision Scripts Exist)
+### Step 5: Run Database Migrations
 
-Alembic migrations can be run when database revision scripts exist in `alembic/versions`:
+Generate and apply the Alembic migration for the `users` table:
 
 ```bash
+# Generate the initial users table revision script
+alembic revision --autogenerate -m "create_users_table"
+
 # Apply pending database migrations
 alembic upgrade head
-
-# Generate a new migration revision after creating ORM models
-alembic revision --autogenerate -m "create_initial_tables"
 ```
 
 ---
@@ -175,6 +179,6 @@ python -m app
 Upon startup, the application will:
 1. Load and validate required environment variables.
 2. Configure structured application logging.
-3. Perform a mandatory `SELECT 1` database health check against PostgreSQL (aborts startup if DB is unavailable).
+3. Perform a mandatory `SELECT 1` database health check against PostgreSQL.
 4. Log in to Discord and execute `sync_application_commands()`.
-5. Register `/ping` slash command.
+5. Register `/ping` and `/profile` slash commands.
