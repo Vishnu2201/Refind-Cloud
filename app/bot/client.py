@@ -5,7 +5,8 @@ import logging
 import discord
 from discord.ext import commands
 
-from app.database.session import close_db_engine
+from app.core.context import get_app_context
+from app.database.session import check_database_health, close_db_engine, init_db_resources
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,28 @@ class RefindCloudBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         """Asynchronous setup hook executed prior to Discord connection establishment."""
+        logger.info("Initializing database resources inside Discord event loop...")
+        ctx = get_app_context()
+
+        db_engine, session_factory = init_db_resources(
+            database_url=ctx.settings.database_url_str,
+            echo=(ctx.settings.ENVIRONMENT == "development" and ctx.settings.LOG_LEVEL.upper() == "DEBUG"),
+        )
+        ctx.db_engine = db_engine
+        ctx.session_factory = session_factory
+
+        logger.info("Executing mandatory PostgreSQL connectivity check (SELECT 1)...")
+        is_healthy = await check_database_health(db_engine)
+        if not is_healthy:
+            logger.critical(
+                "CRITICAL: Required PostgreSQL database infrastructure is unavailable. "
+                "Aborting bot startup sequence. Disposing database resources..."
+            )
+            await close_db_engine(db_engine)
+            raise RuntimeError("PostgreSQL database infrastructure health check failed during bot setup.")
+
+        logger.info("Database health check PASSED: PostgreSQL connection verified.")
+
         logger.info("Loading foundational cogs...")
         await self.load_extension("app.bot.cogs.ping")
         logger.info("Successfully registered cog: app.bot.cogs.ping")

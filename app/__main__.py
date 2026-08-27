@@ -1,6 +1,5 @@
 """Main startup entry point for Refind Cloud Discord bot."""
 
-import asyncio
 import logging
 import sys
 
@@ -10,7 +9,6 @@ from app.bot.client import RefindCloudBot
 from app.core.config import get_settings
 from app.core.context import AppContext, set_app_context
 from app.core.logging import setup_logging
-from app.database.session import check_database_health, close_db_engine, init_db_resources
 
 logger = logging.getLogger("refind_cloud")
 
@@ -41,42 +39,13 @@ def main() -> None:
         f"Starting Refind Cloud Bot Foundation [Environment: {settings.ENVIRONMENT}, LogLevel: {settings.LOG_LEVEL}]"
     )
 
-    # 3. Initialize async database engine and session factory
-    db_engine, session_factory = init_db_resources(
-        database_url=settings.database_url_str,
-        echo=(settings.ENVIRONMENT == "development" and settings.LOG_LEVEL.upper() == "DEBUG"),
-    )
-
-    # Register resources in AppContext as single ownership model
-    app_ctx = AppContext(
-        settings=settings,
-        db_engine=db_engine,
-        session_factory=session_factory,
-    )
+    # 3. Register settings in AppContext container
+    app_ctx = AppContext(settings=settings)
     set_app_context(app_ctx)
 
-    # 4. Mandatory PostgreSQL connectivity health check (SELECT 1)
-    async def verify_database_health() -> bool:
-        logger.info("Executing mandatory PostgreSQL connectivity check (SELECT 1)...")
-        try:
-            return await check_database_health(db_engine)
-        except Exception as exc:
-            logger.critical(f"Unexpected exception during database health check: {exc}", exc_info=True)
-            return False
-
-    is_db_healthy = asyncio.run(verify_database_health())
-
-    if not is_db_healthy:
-        logger.critical(
-            "CRITICAL: Required PostgreSQL database infrastructure is unavailable. "
-            "Aborting startup sequence. Disposing database resources..."
-        )
-        asyncio.run(close_db_engine(db_engine))
-        sys.exit(1)
-
-    logger.info("Database health check PASSED: PostgreSQL connection verified.")
-
-    # 5. Instantiate and run RefindCloudBot ONLY when database infrastructure is healthy
+    # 4. Instantiate and run RefindCloudBot
+    # Database resources initialization and mandatory health checks are executed in setup_hook()
+    # inside Discord's event loop to prevent asyncpg cross-event-loop conflicts.
     bot = RefindCloudBot(guild_id=settings.DISCORD_GUILD_ID)
 
     try:
