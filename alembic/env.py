@@ -16,6 +16,7 @@ import app.modules.guild_members.models  # noqa: F401
 import app.modules.guild_settings.models  # noqa: F401
 import app.modules.guilds.models  # noqa: F401
 import app.modules.roles.models  # noqa: F401
+import app.modules.tickets.models  # noqa: F401
 import app.modules.users.models  # noqa: F401
 
 # Alembic Config object providing access to alembic.ini values
