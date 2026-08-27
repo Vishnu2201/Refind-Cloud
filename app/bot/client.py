@@ -8,6 +8,7 @@ from discord.ext import commands
 from app.core.context import get_app_context
 from app.database.session import check_database_health, close_db_engine, get_session_factory, init_db_resources
 from app.modules.guild_members.service import get_or_create_guild_member
+from app.modules.guild_settings.service import get_or_create_guild_settings
 from app.modules.guilds.service import get_or_create_guild
 from app.modules.users.service import get_or_create_user
 
@@ -50,7 +51,7 @@ class RefindCloudBot(commands.Bot):
             return synced
 
     async def register_connected_guilds(self) -> None:
-        """Persists all connected Discord guilds into PostgreSQL on startup."""
+        """Persists all connected Discord guilds and default settings into PostgreSQL on startup."""
         if not self.guilds:
             return
 
@@ -58,12 +59,16 @@ class RefindCloudBot(commands.Bot):
         async with session_factory() as session:
             async with session.begin():
                 for guild in self.guilds:
-                    await get_or_create_guild(
+                    db_guild, _ = await get_or_create_guild(
                         session=session,
                         discord_guild_id=guild.id,
                         name=guild.name,
                     )
-        logger.info(f"Registered {len(self.guilds)} connected Discord guild(s) in database.")
+                    await get_or_create_guild_settings(
+                        session=session,
+                        guild_id=db_guild.id,
+                    )
+        logger.info(f"Registered {len(self.guilds)} connected Discord guild(s) and settings in database.")
 
     async def setup_hook(self) -> None:
         """Asynchronous setup hook executed prior to Discord connection establishment."""
@@ -108,7 +113,7 @@ class RefindCloudBot(commands.Bot):
         logger.info(f"Initial websocket latency: {latency_ms}ms")
         logger.info(f"Connected to {len(self.guilds)} Discord guild(s).")
 
-        # Persist connected guilds into database
+        # Persist connected guilds and their settings into database
         try:
             await self.register_connected_guilds()
         except Exception as exc:
@@ -121,10 +126,14 @@ class RefindCloudBot(commands.Bot):
             session_factory = get_session_factory()
             async with session_factory() as session:
                 async with session.begin():
-                    await get_or_create_guild(
+                    db_guild, _ = await get_or_create_guild(
                         session=session,
                         discord_guild_id=guild.id,
                         name=guild.name,
+                    )
+                    await get_or_create_guild_settings(
+                        session=session,
+                        guild_id=db_guild.id,
                     )
         except Exception as exc:
             logger.error(f"Error registering newly joined guild {guild.id}: {exc}")
