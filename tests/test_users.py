@@ -51,13 +51,16 @@ async def test_get_user_by_discord_id_query() -> None:
 @pytest.mark.asyncio
 async def test_get_or_create_user_creates_new_user() -> None:
     """Verifies get_or_create_user creates and persists a new User when non-existent."""
-    mock_session = AsyncMock()
+    mock_session = MagicMock()
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = None
-    mock_session.execute.return_value = mock_result
+    mock_session.execute = AsyncMock(return_value=mock_result)
+    mock_session.flush = AsyncMock()
 
-    mock_nested = AsyncMock()
-    mock_session.begin_nested.return_value = mock_nested
+    mock_nested_cm = MagicMock()
+    mock_nested_cm.__aenter__ = AsyncMock(return_value=mock_nested_cm)
+    mock_nested_cm.__aexit__ = AsyncMock(return_value=None)
+    mock_session.begin_nested.return_value = mock_nested_cm
 
     user, created = await get_or_create_user(
         session=mock_session,
@@ -72,6 +75,7 @@ async def test_get_or_create_user_creates_new_user() -> None:
     assert user.global_name == "New User"
     mock_session.add.assert_called_once_with(user)
     mock_session.flush.assert_awaited_once()
+    mock_session.begin_nested.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -153,7 +157,7 @@ async def test_get_or_create_user_updates_global_name_when_changed() -> None:
 @pytest.mark.asyncio
 async def test_get_or_create_user_recovers_from_race_condition_integrity_error() -> None:
     """Verifies IntegrityError during nested savepoint insertion recovers safely by re-querying."""
-    mock_session = AsyncMock()
+    mock_session = MagicMock()
 
     concurrent_user = User(
         discord_user_id=123456789012345678,
@@ -166,12 +170,13 @@ async def test_get_or_create_user_recovers_from_race_condition_integrity_error()
     mock_result_2 = MagicMock()
     mock_result_2.scalar_one_or_none.return_value = concurrent_user
 
-    mock_session.execute.side_effect = [mock_result_1, mock_result_2]
+    mock_session.execute = AsyncMock(side_effect=[mock_result_1, mock_result_2])
+    mock_session.flush = AsyncMock(side_effect=[IntegrityError("duplicate key", params=None, orig=Exception()), None])
 
-    mock_nested = AsyncMock()
-    mock_nested.__aenter__.return_value = mock_nested
-    mock_nested.__aexit__.side_effect = [IntegrityError("duplicate key", params=None, orig=Exception())]
-    mock_session.begin_nested.return_value = mock_nested
+    mock_nested_cm = MagicMock()
+    mock_nested_cm.__aenter__ = AsyncMock(return_value=mock_nested_cm)
+    mock_nested_cm.__aexit__ = AsyncMock(return_value=False)
+    mock_session.begin_nested.return_value = mock_nested_cm
 
     user, created = await get_or_create_user(
         session=mock_session,
@@ -183,3 +188,4 @@ async def test_get_or_create_user_recovers_from_race_condition_integrity_error()
     assert created is False
     assert user == concurrent_user
     mock_session.begin_nested.assert_called_once()
+    assert mock_session.execute.await_count == 2
