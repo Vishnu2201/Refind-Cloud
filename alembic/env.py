@@ -16,9 +16,15 @@ import app.modules.users.models  # noqa: F401
 # Alembic Config object providing access to alembic.ini values
 config = context.config
 
-# Interpret config file for Python logging
-if config.config_file_name:
-    fileConfig(config.config_file_name)
+# Interpret config file for Python logging if required logging sections exist
+if config.config_file_name and config.file_config:
+    has_logging_sections = (
+        config.file_config.has_section("loggers")
+        and config.file_config.has_section("handlers")
+        and config.file_config.has_section("formatters")
+    )
+    if has_logging_sections:
+        fileConfig(config.config_file_name)
 
 # Set target metadata for 'autogenerate' support
 target_metadata = Base.metadata
