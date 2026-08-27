@@ -7,8 +7,10 @@ from discord import app_commands
 from discord.ext import commands
 
 from app.database.session import get_session_factory
+from app.modules.guild_member_roles.service import assign_guild_member_role
 from app.modules.guild_members.service import get_or_create_guild_member
 from app.modules.guilds.service import get_or_create_guild
+from app.modules.roles.service import get_or_create_role
 from app.modules.users.service import get_or_create_user
 
 logger = logging.getLogger(__name__)
@@ -41,7 +43,7 @@ class UserCog(commands.Cog):
                     global_name=global_name,
                 )
 
-                # Register Guild & GuildMember relationship if executed inside a Discord guild
+                # Register Guild, GuildMember, and assigned Roles if executed inside a Discord guild
                 if interaction.guild is not None:
                     guild, _ = await get_or_create_guild(
                         session=session,
@@ -49,12 +51,29 @@ class UserCog(commands.Cog):
                         name=interaction.guild.name,
                     )
                     joined_at = getattr(discord_user, "joined_at", None)
-                    await get_or_create_guild_member(
+                    db_member, _ = await get_or_create_guild_member(
                         session=session,
                         guild_id=guild.id,
                         user_id=user.id,
                         joined_at=joined_at,
                     )
+
+                    if isinstance(discord_user, discord.Member):
+                        for role in discord_user.roles:
+                            if role.is_default() or role.name == "@everyone":
+                                continue
+                            db_role, _ = await get_or_create_role(
+                                session=session,
+                                guild_id=guild.id,
+                                discord_role_id=role.id,
+                                name=role.name,
+                                position=role.position,
+                            )
+                            await assign_guild_member_role(
+                                session=session,
+                                guild_member_id=db_member.id,
+                                role_id=db_role.id,
+                            )
 
         status_label = "New profile created!" if created else "Profile retrieved."
         display_name = f" ({user.global_name})" if user.global_name else ""
