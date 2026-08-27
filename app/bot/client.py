@@ -6,7 +6,8 @@ import discord
 from discord.ext import commands
 
 from app.core.context import get_app_context
-from app.database.session import check_database_health, close_db_engine, init_db_resources
+from app.database.session import check_database_health, close_db_engine, get_session_factory, init_db_resources
+from app.modules.guilds.service import get_or_create_guild
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,22 @@ class RefindCloudBot(commands.Bot):
                 f"Successfully synced {len(synced)} global slash command(s)."
             )
             return synced
+
+    async def register_connected_guilds(self) -> None:
+        """Persists all connected Discord guilds into PostgreSQL on startup."""
+        if not self.guilds:
+            return
+
+        session_factory = get_session_factory()
+        async with session_factory() as session:
+            async with session.begin():
+                for guild in self.guilds:
+                    await get_or_create_guild(
+                        session=session,
+                        discord_guild_id=guild.id,
+                        name=guild.name,
+                    )
+        logger.info(f"Registered {len(self.guilds)} connected Discord guild(s) in database.")
 
     async def setup_hook(self) -> None:
         """Asynchronous setup hook executed prior to Discord connection establishment."""
@@ -88,6 +105,27 @@ class RefindCloudBot(commands.Bot):
         logger.info(f"Bot connected successfully as {user_str} (ID: {user_id})")
         logger.info(f"Initial websocket latency: {latency_ms}ms")
         logger.info(f"Connected to {len(self.guilds)} Discord guild(s).")
+
+        # Persist connected guilds into database
+        try:
+            await self.register_connected_guilds()
+        except Exception as exc:
+            logger.error(f"Error registering connected guilds on startup: {exc}")
+
+    async def on_guild_join(self, guild: discord.Guild) -> None:
+        """Event fired when the bot joins a new Discord guild."""
+        logger.info(f"Joined new Discord guild: {guild.name} (ID: {guild.id})")
+        try:
+            session_factory = get_session_factory()
+            async with session_factory() as session:
+                async with session.begin():
+                    await get_or_create_guild(
+                        session=session,
+                        discord_guild_id=guild.id,
+                        name=guild.name,
+                    )
+        except Exception as exc:
+            logger.error(f"Error registering newly joined guild {guild.id}: {exc}")
 
     async def close(self) -> None:
         """Gracefully disposes database resources and closes Discord websocket connections."""
