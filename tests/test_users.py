@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy import BigInteger
+from sqlalchemy.exc import IntegrityError
 
 from app.database.base import Base
 from app.modules.users.models import User
@@ -34,7 +35,7 @@ def test_discord_user_id_column_constraints() -> None:
 
 @pytest.mark.asyncio
 async def test_get_user_by_discord_id_query() -> None:
-    """Verifies get_user_by_discord_id executes expected SELECT query."""
+    """Verifies get_user_by_discord_id executes expected query and returns matching user."""
     mock_session = AsyncMock()
     mock_result = MagicMock()
     existing_user = User(discord_user_id=111222333444555666, username="alice")
@@ -55,6 +56,9 @@ async def test_get_or_create_user_creates_new_user() -> None:
     mock_result.scalar_one_or_none.return_value = None
     mock_session.execute.return_value = mock_result
 
+    mock_nested = AsyncMock()
+    mock_session.begin_nested.return_value = mock_nested
+
     user, created = await get_or_create_user(
         session=mock_session,
         discord_user_id=123456789012345678,
@@ -71,8 +75,8 @@ async def test_get_or_create_user_creates_new_user() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_or_create_user_returns_existing_user() -> None:
-    """Verifies get_or_create_user returns pre-existing User and created=False when present."""
+async def test_get_or_create_user_returns_existing_unchanged_user() -> None:
+    """Verifies existing user with unchanged data is returned without unnecessary flush calls."""
     mock_session = AsyncMock()
     existing = User(
         discord_user_id=123456789012345678,
@@ -93,3 +97,89 @@ async def test_get_or_create_user_returns_existing_user() -> None:
     assert created is False
     assert user == existing
     mock_session.add.assert_not_called()
+    mock_session.flush.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_user_updates_username_when_changed() -> None:
+    """Verifies existing user username is updated and flushed when Discord username changes."""
+    mock_session = AsyncMock()
+    existing = User(
+        discord_user_id=123456789012345678,
+        username="oldusername",
+        global_name="Display Name",
+    )
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = existing
+    mock_session.execute.return_value = mock_result
+
+    user, created = await get_or_create_user(
+        session=mock_session,
+        discord_user_id=123456789012345678,
+        username="newusername",
+        global_name="Display Name",
+    )
+
+    assert created is False
+    assert user.username == "newusername"
+    mock_session.flush.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_user_updates_global_name_when_changed() -> None:
+    """Verifies existing user global_name is updated and flushed when changed."""
+    mock_session = AsyncMock()
+    existing = User(
+        discord_user_id=123456789012345678,
+        username="samename",
+        global_name="Old Global Name",
+    )
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = existing
+    mock_session.execute.return_value = mock_result
+
+    user, created = await get_or_create_user(
+        session=mock_session,
+        discord_user_id=123456789012345678,
+        username="samename",
+        global_name="New Global Name",
+    )
+
+    assert created is False
+    assert user.global_name == "New Global Name"
+    mock_session.flush.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_user_recovers_from_race_condition_integrity_error() -> None:
+    """Verifies IntegrityError during nested savepoint insertion recovers safely by re-querying."""
+    mock_session = AsyncMock()
+
+    concurrent_user = User(
+        discord_user_id=123456789012345678,
+        username="concurrent_user",
+        global_name="Concurrent User",
+    )
+    mock_result_1 = MagicMock()
+    mock_result_1.scalar_one_or_none.return_value = None
+
+    mock_result_2 = MagicMock()
+    mock_result_2.scalar_one_or_none.return_value = concurrent_user
+
+    mock_session.execute.side_effect = [mock_result_1, mock_result_2]
+
+    mock_nested = AsyncMock()
+    mock_nested.__aenter__.return_value = mock_nested
+    mock_nested.__aexit__.side_effect = [IntegrityError("duplicate key", params=None, orig=Exception())]
+    mock_session.begin_nested.return_value = mock_nested
+
+    user, created = await get_or_create_user(
+        session=mock_session,
+        discord_user_id=123456789012345678,
+        username="concurrent_user",
+        global_name="Concurrent User",
+    )
+
+    assert created is False
+    assert user == concurrent_user
+    mock_session.begin_nested.assert_called_once()
