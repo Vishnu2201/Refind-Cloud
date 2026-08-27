@@ -9,7 +9,8 @@ from app.core.context import get_app_context
 from app.database.session import check_database_health, close_db_engine, get_session_factory, init_db_resources
 from app.modules.guild_members.service import get_or_create_guild_member
 from app.modules.guild_settings.service import get_or_create_guild_settings
-from app.modules.guilds.service import get_or_create_guild
+from app.modules.guilds.service import get_guild_by_discord_id, get_or_create_guild
+from app.modules.roles.service import delete_role, get_or_create_role
 from app.modules.users.service import get_or_create_user
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,7 @@ class RefindCloudBot(commands.Bot):
             return synced
 
     async def register_connected_guilds(self) -> None:
-        """Persists all connected Discord guilds and default settings into PostgreSQL on startup."""
+        """Persists all connected Discord guilds, default settings, and roles into PostgreSQL on startup."""
         if not self.guilds:
             return
 
@@ -68,7 +69,17 @@ class RefindCloudBot(commands.Bot):
                         session=session,
                         guild_id=db_guild.id,
                     )
-        logger.info(f"Registered {len(self.guilds)} connected Discord guild(s) and settings in database.")
+                    for role in guild.roles:
+                        if role.is_default() or role.name == "@everyone":
+                            continue
+                        await get_or_create_role(
+                            session=session,
+                            guild_id=db_guild.id,
+                            discord_role_id=role.id,
+                            name=role.name,
+                            position=role.position,
+                        )
+        logger.info(f"Registered {len(self.guilds)} connected Discord guild(s), settings, and roles in database.")
 
     async def setup_hook(self) -> None:
         """Asynchronous setup hook executed prior to Discord connection establishment."""
@@ -113,7 +124,7 @@ class RefindCloudBot(commands.Bot):
         logger.info(f"Initial websocket latency: {latency_ms}ms")
         logger.info(f"Connected to {len(self.guilds)} Discord guild(s).")
 
-        # Persist connected guilds and their settings into database
+        # Persist connected guilds, settings, and roles into database
         try:
             await self.register_connected_guilds()
         except Exception as exc:
@@ -135,6 +146,16 @@ class RefindCloudBot(commands.Bot):
                         session=session,
                         guild_id=db_guild.id,
                     )
+                    for role in guild.roles:
+                        if role.is_default() or role.name == "@everyone":
+                            continue
+                        await get_or_create_role(
+                            session=session,
+                            guild_id=db_guild.id,
+                            discord_role_id=role.id,
+                            name=role.name,
+                            position=role.position,
+                        )
         except Exception as exc:
             logger.error(f"Error registering newly joined guild {guild.id}: {exc}")
 
@@ -171,6 +192,73 @@ class RefindCloudBot(commands.Bot):
             logger.error(
                 f"Error persisting guild member join for user {member.id} in guild {member.guild.id}: {exc}"
             )
+
+    async def on_guild_role_create(self, role: discord.Role) -> None:
+        """Event fired when a new role is created in a Discord guild."""
+        if role.is_default() or role.name == "@everyone":
+            return
+        logger.info(f"Role created in guild {role.guild.name}: {role.name} (ID: {role.id})")
+        try:
+            session_factory = get_session_factory()
+            async with session_factory() as session:
+                async with session.begin():
+                    db_guild, _ = await get_or_create_guild(
+                        session=session,
+                        discord_guild_id=role.guild.id,
+                        name=role.guild.name,
+                    )
+                    await get_or_create_role(
+                        session=session,
+                        guild_id=db_guild.id,
+                        discord_role_id=role.id,
+                        name=role.name,
+                        position=role.position,
+                    )
+        except Exception as exc:
+            logger.error(f"Error persisting role creation for role {role.id}: {exc}")
+
+    async def on_guild_role_update(self, before: discord.Role, after: discord.Role) -> None:
+        """Event fired when a role is updated in a Discord guild."""
+        if after.is_default() or after.name == "@everyone":
+            return
+        logger.info(f"Role updated in guild {after.guild.name}: {after.name} (ID: {after.id})")
+        try:
+            session_factory = get_session_factory()
+            async with session_factory() as session:
+                async with session.begin():
+                    db_guild, _ = await get_or_create_guild(
+                        session=session,
+                        discord_guild_id=after.guild.id,
+                        name=after.guild.name,
+                    )
+                    await get_or_create_role(
+                        session=session,
+                        guild_id=db_guild.id,
+                        discord_role_id=after.id,
+                        name=after.name,
+                        position=after.position,
+                    )
+        except Exception as exc:
+            logger.error(f"Error persisting role update for role {after.id}: {exc}")
+
+    async def on_guild_role_delete(self, role: discord.Role) -> None:
+        """Event fired when a role is deleted from a Discord guild."""
+        if role.is_default() or role.name == "@everyone":
+            return
+        logger.info(f"Role deleted in guild {role.guild.name}: {role.name} (ID: {role.id})")
+        try:
+            session_factory = get_session_factory()
+            async with session_factory() as session:
+                async with session.begin():
+                    db_guild = await get_guild_by_discord_id(session, role.guild.id)
+                    if db_guild is not None:
+                        await delete_role(
+                            session=session,
+                            guild_id=db_guild.id,
+                            discord_role_id=role.id,
+                        )
+        except Exception as exc:
+            logger.error(f"Error persisting role deletion for role {role.id}: {exc}")
 
     async def close(self) -> None:
         """Gracefully disposes database resources and closes Discord websocket connections."""
