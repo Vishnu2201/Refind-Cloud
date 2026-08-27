@@ -148,6 +148,8 @@ class RefindCloudBot(commands.Bot):
         logger.info("Successfully registered cog: app.bot.cogs.ping")
         await self.load_extension("app.bot.cogs.user")
         logger.info("Successfully registered cog: app.bot.cogs.user")
+        await self.load_extension("app.bot.cogs.tickets")
+        logger.info("Successfully registered cog: app.bot.cogs.tickets")
 
         # Synchronize slash commands using dedicated reusable method
         await self.sync_application_commands()
