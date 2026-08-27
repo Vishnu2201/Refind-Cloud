@@ -77,6 +77,7 @@ def test_tickets_status_default_configuration() -> None:
 async def test_create_ticket() -> None:
     """Verifies create_ticket creates a ticket with OPEN status and flushes session."""
     mock_session = AsyncMock()
+    mock_session.add = MagicMock()
     guild_id = uuid.uuid4()
     user_id = uuid.uuid4()
     subject = "Need help with roles"
