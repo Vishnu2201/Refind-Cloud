@@ -47,10 +47,43 @@ def create_mock_interaction(
     else:
         interaction.channel = None
 
-    interaction.response = AsyncMock()
-    interaction.response.is_done.return_value = is_done
+    # InteractionResponse in discord.py has a synchronous is_done() method returning bool
+    interaction.response = MagicMock(spec=discord.InteractionResponse)
+    interaction.response.is_done = MagicMock(return_value=is_done)
+    interaction.response.send_message = AsyncMock()
     interaction.followup = AsyncMock()
     return interaction
+
+
+def create_mock_session() -> AsyncMock:
+    """Helper creating a mock AsyncSession with correct synchronous methods and async context manager behavior."""
+    mock_session = AsyncMock()
+
+    # session.add is synchronous in AsyncSession
+    mock_session.add = MagicMock()
+
+    # session.begin is synchronous and returns an async context manager
+    mock_begin_cm = MagicMock()
+    mock_begin_cm.__aenter__ = AsyncMock(return_value=None)
+    mock_begin_cm.__aexit__ = AsyncMock(return_value=None)
+    mock_session.begin = MagicMock(return_value=mock_begin_cm)
+
+    return mock_session
+
+
+def setup_mock_session_factory(
+    mock_session_factory: MagicMock, mock_session: AsyncMock | None = None
+) -> AsyncMock:
+    """Configures get_session_factory mock to return an async context manager yielding mock_session."""
+    if mock_session is None:
+        mock_session = create_mock_session()
+
+    mock_session_cm = MagicMock()
+    mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session_cm.__aexit__ = AsyncMock(return_value=None)
+
+    mock_session_factory.return_value = MagicMock(return_value=mock_session_cm)
+    return mock_session
 
 
 @pytest.mark.asyncio
@@ -102,9 +135,7 @@ async def test_ticket_command_existing_open_ticket(
     mock_get_user.return_value = (mock_db_user, False)
     mock_get_open_ticket.return_value = mock_existing_ticket
 
-    mock_session = AsyncMock()
-    mock_session_factory.return_value.return_value.__aenter__.return_value = mock_session
-    mock_session.begin.return_value.__aenter__.return_value = None
+    setup_mock_session_factory(mock_session_factory)
 
     await cog.ticket.callback(cog, interaction, subject="Duplicate test")
 
@@ -157,9 +188,7 @@ async def test_ticket_command_successful_creation(
     mock_channel.mention = "<#888999000>"
     interaction.guild.create_text_channel.return_value = mock_channel
 
-    mock_session = AsyncMock()
-    mock_session_factory.return_value.return_value.__aenter__.return_value = mock_session
-    mock_session.begin.return_value.__aenter__.return_value = None
+    mock_session = setup_mock_session_factory(mock_session_factory)
 
     await cog.ticket.callback(cog, interaction, subject="Billing issue")
 
@@ -226,9 +255,7 @@ async def test_ticket_command_channel_creation_failure_rollback(
         response=MagicMock(), message="Missing Permissions"
     )
 
-    mock_session = AsyncMock()
-    mock_session_factory.return_value.return_value.__aenter__.return_value = mock_session
-    mock_session.begin.return_value.__aenter__.return_value = None
+    mock_session = setup_mock_session_factory(mock_session_factory)
 
     await cog.ticket.callback(cog, interaction, subject="Failed channel")
 
@@ -278,9 +305,7 @@ async def test_ticket_command_channel_link_failure_cleanup(
 
     mock_set_channel.side_effect = RuntimeError("DB Connection Loss")
 
-    mock_session = AsyncMock()
-    mock_session_factory.return_value.return_value.__aenter__.return_value = mock_session
-    mock_session.begin.return_value.__aenter__.return_value = None
+    mock_session = setup_mock_session_factory(mock_session_factory)
 
     await cog.ticket.callback(cog, interaction, subject="Link Fail")
 
@@ -330,9 +355,7 @@ async def test_ticket_command_welcome_message_failure(
     mock_channel.send.side_effect = discord.HTTPException(response=MagicMock(), message="Cannot Send Embed")
     interaction.guild.create_text_channel.return_value = mock_channel
 
-    mock_session = AsyncMock()
-    mock_session_factory.return_value.return_value.__aenter__.return_value = mock_session
-    mock_session.begin.return_value.__aenter__.return_value = None
+    mock_session = setup_mock_session_factory(mock_session_factory)
 
     await cog.ticket.callback(cog, interaction, subject="Welcome Fail")
 
@@ -362,9 +385,7 @@ async def test_close_ticket_button_success(
 
     mock_get_ticket_by_channel.return_value = mock_ticket
 
-    mock_session = AsyncMock()
-    mock_session_factory.return_value.return_value.__aenter__.return_value = mock_session
-    mock_session.begin.return_value.__aenter__.return_value = None
+    mock_session = setup_mock_session_factory(mock_session_factory)
 
     await handle_close_ticket_interaction(interaction)
 
@@ -392,9 +413,7 @@ async def test_close_ticket_button_already_closed(
 
     mock_get_ticket_by_channel.return_value = mock_ticket
 
-    mock_session = AsyncMock()
-    mock_session_factory.return_value.return_value.__aenter__.return_value = mock_session
-    mock_session.begin.return_value.__aenter__.return_value = None
+    setup_mock_session_factory(mock_session_factory)
 
     await handle_close_ticket_interaction(interaction)
 
@@ -417,9 +436,7 @@ async def test_close_ticket_button_non_ticket_channel(
     interaction = create_mock_interaction(channel_id=999999999)
     mock_get_ticket_by_channel.return_value = None
 
-    mock_session = AsyncMock()
-    mock_session_factory.return_value.return_value.__aenter__.return_value = mock_session
-    mock_session.begin.return_value.__aenter__.return_value = None
+    setup_mock_session_factory(mock_session_factory)
 
     await handle_close_ticket_interaction(interaction)
 
